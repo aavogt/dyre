@@ -4,13 +4,14 @@ deals with error handling, and not the compilation itself /per se/.
 -}
 module Config.Dyre.Compile ( customCompile, getErrorPath, getErrorString ) where
 
+import Prelude hiding (catch)
 import System.IO         ( openFile, hClose, IOMode(..) )
 import System.Exit       ( ExitCode(..) )
 import System.Process    ( runProcess, waitForProcess )
 import System.FilePath   ( (</>) )
 import System.Directory  ( getCurrentDirectory, doesFileExist
                          , createDirectoryIfMissing )
-import Control.Exception ( bracket )
+import Control.Exception ( catch, bracket, SomeException(..) )
 import GHC.Paths         ( ghc )
 
 import Config.Dyre.Paths  ( getPaths )
@@ -45,14 +46,15 @@ customCompile params@Params{statusOut = output} = do
 
     -- Compile occurs in here
     errFile <- getErrorPath params
-    result <- bracket (openFile errFile WriteMode) hClose $ \errHandle -> do
+    success <- bracket (openFile errFile WriteMode) hClose $ \errHandle -> do
         ghcOpts <- makeFlags params configFile tempBinary cacheDir
         ghcProc <- runProcess ghc ghcOpts (Just cacheDir) Nothing
                               Nothing Nothing (Just errHandle)
-        waitForProcess ghcProc
+        ((return $!) . (==ExitSuccess) =<< waitForProcess ghcProc)
+            `catch` \SomeException{} -> return False
 
     -- Display a helpful little status message
-    if result /= ExitSuccess
+    if not success
        then output "Error occurred while loading configuration file."
        else output "Program reconfiguration successful."
 
